@@ -1,0 +1,56 @@
+{
+    "name": "mjoc1985/fhr-client",
+    "description": "FHR Universal API client (search, inventory, cart) for Laravel.",
+    "keywords": ["fhr", "parking", "lounges", "laravel", "api-client", "travel"],
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "mjoc1985",
+            "email": "mjoc1985@gmail.com"
+        }
+    ],
+    "require": {
+        "php": "^8.4",
+        "illuminate/contracts": "^11.0 || ^12.0",
+        "illuminate/http": "^11.0 || ^12.0",
+        "illuminate/support": "^11.0 || ^12.0",
+        "spatie/laravel-data": "^4.18"
+    },
+    "require-dev": {
+        "larastan/larastan": "^3.0",
+        "laravel/pint": "^1.0",
+        "orchestra/testbench": "^9.0 || ^10.0",
+        "pestphp/pest": "^3.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Mjoc1985\\Fhr\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Mjoc1985\\Fhr\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Mjoc1985\\Fhr\\FhrServiceProvider"
+            ]
+        }
+    },
+    "scripts": {
+        "test": "pest",
+        "lint": "pint",
+        "analyse": "phpstan analyse"
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
