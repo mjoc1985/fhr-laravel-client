@@ -28,7 +28,7 @@ All settings are environment-driven (`config/fhr.php`). The common ones:
 ```dotenv
 FHR_API_URL=https://www.bookfhr.com/api
 FHR_API_TOKEN=your-production-token
-FHR_SOURCE_CODE=SPS0
+FHR_SOURCE_CODE=your-source-code
 FHR_TENANT=your-tenant
 
 # Sandbox (used when you request sandbox mode explicitly)
