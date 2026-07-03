@@ -2,7 +2,7 @@
 
 All notable changes to `mjoc1985/fhr-laravel-client` will be documented in this file.
 
-## [Unreleased]
+## [1.0.0] - 2026-07-03
 
 ### Added
 - **Tier 1 endpoint coverage** (from the DOOYER API spec):
