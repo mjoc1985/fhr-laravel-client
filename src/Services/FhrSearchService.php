@@ -6,7 +6,9 @@ use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
 use InvalidArgumentException;
 use Mjoc1985\Fhr\Data\FhrSearchResultData;
+use Mjoc1985\Fhr\Data\FhrSearchValidityData;
 use Mjoc1985\Fhr\Enums\FhrProductType;
+use Mjoc1985\Fhr\Exceptions\FhrException;
 use Mjoc1985\Fhr\FhrClient;
 
 class FhrSearchService
@@ -144,6 +146,44 @@ class FhrSearchService
     }
 
     /**
+     * Retrieve previously cached search results by search ID.
+     *
+     * FHR stores search results with a limited TTL; this returns them without
+     * re-running the search.
+     */
+    public function getSearchById(string $searchId): FhrSearchResultData
+    {
+        $response = $this->client->get("search/{$searchId}");
+
+        return $this->parseSearchResponse($response);
+    }
+
+    /**
+     * Check whether a search session is still valid (not expired).
+     *
+     * An expired search returns HTTP 410 from FHR, which is surfaced here as
+     * an "expired" result rather than a thrown exception.
+     */
+    public function checkSearch(string $searchId): FhrSearchValidityData
+    {
+        try {
+            $response = $this->client->get("search-check/{$searchId}");
+        } catch (FhrException $e) {
+            if ($e->getCode() === 410) {
+                return FhrSearchValidityData::expired($searchId);
+            }
+
+            throw $e;
+        }
+
+        return new FhrSearchValidityData(
+            searchId: $response['searchId'] ?? $searchId,
+            valid: (bool) ($response['valid'] ?? false),
+            status: $response['status'] ?? 'unknown',
+        );
+    }
+
+    /**
      * Clear the search cache for specific parameters.
      */
     public function clearCache(array $params): void
@@ -203,7 +243,8 @@ class FhrSearchService
     {
         ksort($params);
         $hash = md5(json_encode($params));
+        $env = $this->client->isSandbox() ? 'sandbox' : 'production';
 
-        return "fhr_search:{$hash}";
+        return "fhr_search:{$env}:{$hash}";
     }
 }

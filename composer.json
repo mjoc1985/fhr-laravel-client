@@ -1,6 +1,6 @@
 {
-    "name": "mjoc1985/fhr-client",
-    "description": "FHR Universal API client (search, inventory, cart) for Laravel.",
+    "name": "mjoc1985/fhr-laravel-client",
+    "description": "FHR API client (search, inventory, cart) for Laravel.",
     "keywords": ["fhr", "parking", "lounges", "laravel", "api-client", "travel"],
     "type": "library",
     "license": "MIT",

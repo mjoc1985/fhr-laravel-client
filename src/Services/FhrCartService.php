@@ -2,7 +2,7 @@
 
 namespace Mjoc1985\Fhr\Services;
 
-use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Mjoc1985\Fhr\Data\FhrCartData;
 use Mjoc1985\Fhr\Data\FhrCartItemData;
@@ -92,6 +92,29 @@ class FhrCartService
     }
 
     /**
+     * Get the raw items currently in a cart.
+     *
+     * Unlike {@see self::getCart()} (which reads the totals endpoint), this
+     * hits `GET cart/{id}` and returns the individual cart items.
+     *
+     * @return Collection<int, FhrCartItemData>
+     */
+    public function getCartItems(string $cartId): Collection
+    {
+        $response = $this->client->get("cart/{$cartId}");
+
+        // Prefer an explicit `items` key; otherwise only treat the response as
+        // the item list when it is a plain array. An associative cart object
+        // without an `items` key yields no items rather than being mis-mapped.
+        $items = $response['items'] ?? (array_is_list($response) ? $response : []);
+
+        return collect($items)
+            ->filter(fn ($item) => is_array($item))
+            ->map(fn (array $item) => FhrCartItemData::fromApiResponse($item))
+            ->values();
+    }
+
+    /**
      * Get cart totals.
      */
     public function getTotals(string $cartId): FhrCartTotalsData
@@ -112,7 +135,112 @@ class FhrCartService
         array $products,
         ?string $itemId = null,
     ): FhrOrderResponseData {
-        $productData = collect($products)->map(function (array $product, int $index) use ($itemId) {
+        $payload = [
+            'customer' => $customer->toArray(),
+            'products' => $this->mapOrderProducts($products, $itemId),
+        ];
+
+        Log::channel(config('fhr.log_channel'))->info('Submitting FHR cart order', [
+            'cart_id' => $cartId,
+            'item_id' => $itemId,
+            'payload' => $this->redactPayload($payload),
+        ]);
+
+        $response = $this->client->post("cart/{$cartId}/order/submit", $payload);
+
+        return FhrOrderResponseData::from([
+            'success' => $response['success'] ?? false,
+            'order' => $response['order'] ?? null,
+            'message' => $response['message'] ?? null,
+            'error' => $response['error'] ?? null,
+        ]);
+    }
+
+    /**
+     * Pre-validate an order with FHR before payment.
+     *
+     * Creates a provisional reservation to verify availability; no payment is
+     * processed. Call this before taking payment and submitting the order.
+     *
+     * @param  array<int, array<string, mixed>>  $products
+     */
+    public function validateOrder(
+        string $cartId,
+        FhrCustomerData $customer,
+        array $products,
+        ?string $itemId = null,
+    ): FhrOrderResponseData {
+        $payload = [
+            'customer' => $customer->toArray(),
+            'products' => $this->mapOrderProducts($products, $itemId),
+        ];
+
+        Log::channel(config('fhr.log_channel'))->info('Validating FHR cart order', [
+            'cart_id' => $cartId,
+            'item_id' => $itemId,
+        ]);
+
+        $response = $this->client->post("cart/{$cartId}/order/validate", $payload);
+
+        return FhrOrderResponseData::from([
+            'success' => $response['success'] ?? false,
+            'order' => $response['order'] ?? null,
+            'message' => $response['message'] ?? null,
+            'error' => $response['error'] ?? null,
+        ]);
+    }
+
+    /**
+     * Strip personal data from an order payload before it is logged.
+     *
+     * The customer block, any lounge `additional_passengers`, and the vehicle
+     * registration carry PII (names, email, phone, number plate), which should
+     * not land in log storage. Non-personal vehicle fields (make, model,
+     * colour) and other references (ids, types, flights) are kept for debugging.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function redactPayload(array $payload): array
+    {
+        if (isset($payload['customer'])) {
+            $payload['customer'] = ['redacted' => true];
+        }
+
+        if (isset($payload['products']) && is_array($payload['products'])) {
+            $payload['products'] = array_map(function ($product) {
+                if (! is_array($product)) {
+                    return $product;
+                }
+
+                if (isset($product['additional_passengers'])) {
+                    $product['additional_passengers'] = ['redacted' => true];
+                }
+
+                if (isset($product['vehicle']) && is_array($product['vehicle'])) {
+                    foreach (['reg', 'vehicle_reg', 'registration'] as $regKey) {
+                        if (isset($product['vehicle'][$regKey])) {
+                            $product['vehicle'][$regKey] = 'redacted';
+                        }
+                    }
+                }
+
+                return $product;
+            }, $payload['products']);
+        }
+
+        return $payload;
+    }
+
+    /**
+     * Build the `products` payload shared by validate and submit.
+     *
+     * @param  array<int, array<string, mixed>>  $products
+     * @return array<int, array<string, mixed>>
+     */
+    private function mapOrderProducts(array $products, ?string $itemId): array
+    {
+        return collect($products)->map(function (array $product, int $index) use ($itemId) {
             // Use the actual item ID if provided, otherwise fall back to index + 1
             $id = $itemId ?? (string) ($index + 1);
 
@@ -132,26 +260,6 @@ class FhrCartService
 
             return $data;
         })->all();
-
-        $payload = [
-            'customer' => $customer->toArray(),
-            'products' => $productData,
-        ];
-
-        Log::channel(config('fhr.log_channel'))->info('Submitting FHR cart order', [
-            'cart_id' => $cartId,
-            'item_id' => $itemId,
-            'payload' => $payload,
-        ]);
-
-        $response = $this->client->post("cart/{$cartId}/order/submit", $payload);
-
-        return FhrOrderResponseData::from([
-            'success' => $response['success'] ?? false,
-            'order' => $response['order'] ?? null,
-            'message' => $response['message'] ?? null,
-            'error' => $response['error'] ?? null,
-        ]);
     }
 
     /**
@@ -233,19 +341,15 @@ class FhrCartService
     {
         $isSandbox = $this->client->isSandbox();
 
-        // Use sandbox config when test mode is enabled
+        // The payment host lives outside the JSON API base URL; the token,
+        // however, is already held (sandbox-aware) by the injected client.
         $paymentUrl = $isSandbox
             ? (config('fhr.sandbox_payment_url') ?: config('fhr.payment_url'))
             : config('fhr.payment_url');
 
-        $token = $isSandbox
-            ? (config('fhr.sandbox_token') ?: config('fhr.token'))
-            : config('fhr.token');
-
         $tenant = $isSandbox
             ? (config('fhr.sandbox_tenant') ?: config('fhr.tenant'))
             : config('fhr.tenant');
-        $timeout = config('fhr.timeout', 30);
 
         if (empty($tenant)) {
             Log::channel(config('fhr.log_channel'))->error('FHR tenant not configured');
@@ -262,24 +366,9 @@ class FhrCartService
         ]);
 
         try {
-            $response = Http::withHeaders([
-                'Authorization' => "Bearer {$token}",
-                'Accept' => 'text/plain',
-            ])
-                ->timeout($timeout)
-                ->get($url);
-
-            if (! $response->successful()) {
-                Log::channel(config('fhr.log_channel'))->error('FHR checkout URL request failed', [
-                    'cart_id' => $cartId,
-                    'status' => $response->status(),
-                    'body' => $response->body(),
-                ]);
-
-                return FhrCheckoutData::failed("FHR checkout request failed with status {$response->status()}");
-            }
-
-            $checkoutUrl = trim($response->body());
+            // Routed through the client so retry, rate limiting, and API
+            // logging apply consistently with every other FHR request.
+            $checkoutUrl = trim($this->client->getText($url));
 
             if (empty($checkoutUrl) || ! str_starts_with($checkoutUrl, 'http')) {
                 Log::channel(config('fhr.log_channel'))->error('FHR checkout URL invalid', [
@@ -296,7 +385,7 @@ class FhrCartService
             ]);
 
             return FhrCheckoutData::success($checkoutUrl);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::channel(config('fhr.log_channel'))->error('FHR checkout URL exception', [
                 'cart_id' => $cartId,
                 'error' => $e->getMessage(),

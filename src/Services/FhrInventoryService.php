@@ -194,12 +194,17 @@ class FhrInventoryService
 
     private function getCacheKey(string $type): string
     {
-        return "fhr_inventory:{$type}";
+        return "fhr_inventory:{$this->environment()}:{$type}";
     }
 
     private function getProductCacheKey(string $type, int $productId): string
     {
-        return "fhr_inventory:{$type}:{$productId}";
+        return "fhr_inventory:{$this->environment()}:{$type}:{$productId}";
+    }
+
+    private function environment(): string
+    {
+        return $this->client->isSandbox() ? 'sandbox' : 'production';
     }
 
     /**

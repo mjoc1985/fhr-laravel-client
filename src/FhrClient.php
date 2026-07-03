@@ -97,6 +97,41 @@ class FhrClient
         return $this->request('DELETE', $endpoint, $data);
     }
 
+    /**
+     * Perform a GET against an absolute URL and return the raw response body.
+     *
+     * Used for endpoints that live outside the JSON API base URL and respond
+     * with plain text (e.g. FHR's payment host returning a checkout URL). Goes
+     * through the same retry, rate limiting, and logging as the JSON methods.
+     */
+    public function getText(string $url): string
+    {
+        $this->checkRateLimit();
+
+        $startTime = microtime(true);
+        $context = [
+            'method' => 'GET',
+            'endpoint' => $url,
+            'url' => $url,
+        ];
+
+        try {
+            $response = $this->makeRequest('GET', $url, [], accept: 'text/plain');
+            $duration = round((microtime(true) - $startTime) * 1000, 2);
+
+            $this->logRequest($context, $response, $duration);
+            $this->logToApiLogger('GET', $url, $url, [], null, $response->status(), $duration, true);
+            $this->incrementRateLimit();
+
+            return $response->body();
+        } catch (FhrException $e) {
+            $duration = round((microtime(true) - $startTime) * 1000, 2);
+            $this->logError($context, $e);
+            $this->logToApiLogger('GET', $url, $url, [], $e->getResponseBody(), $e->getCode(), $duration, false, $e->getMessage());
+            throw $e;
+        }
+    }
+
     public function getSource(): string
     {
         return $this->source;
@@ -132,9 +167,9 @@ class FhrClient
         }
     }
 
-    private function makeRequest(string $method, string $url, array $data): Response
+    private function makeRequest(string $method, string $url, array $data, string $accept = 'application/json'): Response
     {
-        $response = $this->client()
+        $response = $this->client($accept)
             ->retry($this->retryTimes, $this->retrySleepMs, function (\Throwable $exception, PendingRequest $request) {
                 // Only retry on server errors (5xx)
                 if ($exception instanceof RequestException) {
@@ -150,11 +185,11 @@ class FhrClient
         return $response;
     }
 
-    private function client(): PendingRequest
+    private function client(string $accept = 'application/json'): PendingRequest
     {
         return Http::withHeaders([
             'Authorization' => "Bearer {$this->token}",
-            'Accept' => 'application/json',
+            'Accept' => $accept,
             'Content-Type' => 'application/json',
         ])->timeout($this->timeout);
     }

@@ -19,6 +19,33 @@ beforeEach(function () {
     ]);
 });
 
+it('redacts customer PII and the vehicle registration before logging an order payload', function () {
+    $service = FhrCartService::make();
+
+    $method = (new ReflectionClass($service))->getMethod('redactPayload');
+    $method->setAccessible(true);
+
+    $redacted = $method->invoke($service, [
+        'customer' => ['firstName' => 'John', 'email' => 'john@example.com'],
+        'products' => [
+            [
+                '_id' => 'item-1',
+                'type' => 'Parking',
+                'vehicle' => ['reg' => 'AB12 CDE', 'make' => 'Ford', 'model' => 'Focus'],
+                'additional_passengers' => [['name' => 'Jane']],
+            ],
+        ],
+    ]);
+
+    expect($redacted['customer'])->toBe(['redacted' => true])
+        ->and($redacted['products'][0]['vehicle']['reg'])->toBe('redacted')
+        ->and($redacted['products'][0]['additional_passengers'])->toBe(['redacted' => true])
+        // Non-personal vehicle fields stay intact for debugging.
+        ->and($redacted['products'][0]['vehicle']['make'])->toBe('Ford')
+        ->and($redacted['products'][0]['vehicle']['model'])->toBe('Focus')
+        ->and($redacted['products'][0]['_id'])->toBe('item-1');
+});
+
 it('can create a cart', function () {
     Http::fake([
         'https://www.bookfhr.com/api/cart/create' => Http::response([
@@ -342,6 +369,59 @@ it('submits lounge order without additional passengers when empty array provided
         return $product['type'] === 'Lounge'
             && ! isset($product['additional_passengers']);
     });
+});
+
+it('retrieves the checkout URL through the client', function () {
+    config([
+        'fhr.payment_url' => 'https://www.bookfhr.com/payment',
+        'fhr.tenant' => 'acme',
+    ]);
+
+    Http::fake([
+        'https://www.bookfhr.com/payment/checkout/acme/cart-123' => Http::response(
+            "https://checkout.stripe.com/pay/cs_test_123\n",
+            200,
+        ),
+    ]);
+
+    $service = FhrCartService::make();
+    $checkout = $service->getCheckoutUrl('cart-123');
+
+    expect($checkout->success)->toBeTrue()
+        ->and($checkout->checkoutUrl)->toBe('https://checkout.stripe.com/pay/cs_test_123');
+
+    Http::assertSent(function ($request) {
+        return str_contains($request->url(), 'payment/checkout/acme/cart-123')
+            && $request->hasHeader('Authorization', 'Bearer test-token');
+    });
+});
+
+it('fails checkout when the tenant is not configured', function () {
+    config(['fhr.payment_url' => 'https://www.bookfhr.com/payment', 'fhr.tenant' => null]);
+
+    Http::fake();
+
+    $service = FhrCartService::make();
+    $checkout = $service->getCheckoutUrl('cart-123');
+
+    expect($checkout->success)->toBeFalse();
+    Http::assertNothingSent();
+});
+
+it('fails checkout when FHR returns a non-URL body', function () {
+    config([
+        'fhr.payment_url' => 'https://www.bookfhr.com/payment',
+        'fhr.tenant' => 'acme',
+    ]);
+
+    Http::fake([
+        'https://www.bookfhr.com/payment/checkout/acme/cart-123' => Http::response('not-a-url', 200),
+    ]);
+
+    $service = FhrCartService::make();
+    $checkout = $service->getCheckoutUrl('cart-123');
+
+    expect($checkout->success)->toBeFalse();
 });
 
 it('handles failed order submission', function () {

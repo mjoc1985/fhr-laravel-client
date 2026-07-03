@@ -20,8 +20,8 @@ return [
     |--------------------------------------------------------------------------
     */
 
-    'base_url' => env('FHR_API_URL', 'https://bookfhr.dev/api'),
-    'payment_url' => env('FHR_PAYMENT_URL', 'https://bookfhr.dev/payment'),
+    'base_url' => env('FHR_API_URL', 'https://www.bookfhr.com/api'),
+    'payment_url' => env('FHR_PAYMENT_URL', 'https://www.bookfhr.com/payment'),
     'token' => env('FHR_API_TOKEN'),
 
     /*

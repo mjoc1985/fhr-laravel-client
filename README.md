@@ -1,8 +1,8 @@
 # FHR Client
 
-A standalone Laravel client for the **FHR Universal API** — search, inventory, and cart/checkout for airport parking, lounges, and hotels.
+A standalone Laravel client for the **FHR API** — search, inventory, and cart/checkout for airport parking, lounges, and hotels.
 
-Extracted from the ParkRight platform into a reusable, publishable package. It contains the low-level SDK only (HTTP client, DTOs, enums, exceptions). Application-specific concerns — syncing the catalogue into your database, pricing against your own products, persisting bookings — stay in your app and consume this package.
+A reusable, publishable package containing the low-level SDK only (HTTP client, DTOs, enums, exceptions). Application-specific concerns — syncing the catalogue into your database, pricing against your own products, persisting bookings — stay in your app and consume this package.
 
 ## Requirements
 
@@ -12,7 +12,7 @@ Extracted from the ParkRight platform into a reusable, publishable package. It c
 ## Installation
 
 ```bash
-composer require mjoc1985/fhr-client
+composer require mjoc1985/fhr-laravel-client
 ```
 
 The service provider is auto-discovered. Publish the config if you want to customise it:
